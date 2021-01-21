@@ -18,7 +18,10 @@ import android.text.TextUtils;
 import java.lang.reflect.Method;
 
 /**
- * Created by zhuleiyue on 2018/3/12.
+ * 创建 AccessPoint 来保存 WIFI 的信息和状态:
+ * 分别获取到附近的 WIFI 列表和已保存的 WIFI 列表后，需要匹配附近的 WIFI 和已保存的 WIFI，对已匹配上的 WIFI 需要同事保存其信息和状态。
+ * 通过查看源码可以知道，Settings 中 WIFI 设置的列表是将 WIFI 信息和状态保存到了 AccessPoint 中。
+ * 但是 AccessPoint 无法直接使用，所以需要自己创建一个 AccessPoint 类。
  */
 
 public class AccessPoint implements Parcelable, Comparable<AccessPoint> {
@@ -290,7 +293,7 @@ public class AccessPoint implements Parcelable, Comparable<AccessPoint> {
     }
 
     /**
-     * 生成 wifiConfiguration
+     * III.WIFI 连接(A,B,...): A.生成 wifiConfiguration
      */
     public void generateNetworkConfig() {
         if (wifiConfiguration != null)

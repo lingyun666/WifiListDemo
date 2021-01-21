@@ -45,6 +45,9 @@ import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.schedulers.Schedulers;
 
+/**
+ * 参考https://juejin.cn/post/6844903875263250445#heading-1
+ */
 public class MainActivity extends AppCompatActivity {
     private WifiManager wifiManager;
     private NetworkInfo lastNetworkInfo;
@@ -58,10 +61,12 @@ public class MainActivity extends AppCompatActivity {
 
     private WifiListAdapter adapter;
 
+    // I.获取 WIFI 列表(1,2,...)
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        // 1.通过 Application 的 Context 获取到 WifiManager，调用 setWifiEnable(true) 开启 wifi
         wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         if (wifiManager == null) {
             finish();
@@ -86,13 +91,16 @@ public class MainActivity extends AppCompatActivity {
         rvList.setAdapter(adapter);
     }
 
+    // II.WIFI 列表刷新(a,b,...) :获取到 WIFI 列表后，需要定时刷新，并且在 WIFI 连接发生变化时也需要刷新列表
     @Override
     protected void onStart() {
         super.onStart();
+        // a.定时刷新WIFI列表:每隔 10 秒钟调用一次 startScan() 方法，然后在广播接收者中更新列表
         scanWifi = Observable.interval(0, 10, TimeUnit.SECONDS)
                 .observeOn(Schedulers.io())
-                .doOnNext(aLong -> wifiManager.startScan())
+                .doOnNext(aLong -> wifiManager.startScan()) // 2.使用 startScan() 方法开始扫描附近的 WIFI 信号
                 .subscribe();
+        // b.监听网络变化: 注册广播
         IntentFilter filter = new IntentFilter();
         filter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         filter.addAction(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION);
@@ -105,6 +113,7 @@ public class MainActivity extends AppCompatActivity {
         if (cm != null) {
             NetworkRequest.Builder request = new NetworkRequest.Builder()
                     .addTransportType(NetworkCapabilities.TRANSPORT_WIFI);
+            // d.注册网络回调
             cm.registerNetworkCallback(request.build(), callback);
         }
     }
@@ -122,16 +131,19 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // 3.广播
     private BroadcastReceiver broadcastReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
             if (action != null) {
+                // c.接收广播并更新 wifi 列表
                 switch (action) {
                     case ConnectivityManager.CONNECTIVITY_ACTION:
                     case WifiManager.SCAN_RESULTS_AVAILABLE_ACTION:
                     case "android.net.wifi.CONFIGURED_NETWORKS_CHANGE":
                     case "android.net.wifi.LINK_CONFIGURATION_CHANGED":
+                        // 4.获取扫描结果
                         updateAccessPoints();
                         break;
                     case WifiManager.NETWORK_STATE_CHANGED_ACTION:
@@ -142,6 +154,7 @@ public class MainActivity extends AppCompatActivity {
                     case WifiManager.SUPPLICANT_STATE_CHANGED_ACTION:
                         int error = intent.getIntExtra(WifiManager.EXTRA_SUPPLICANT_ERROR, -1);
                         if (error == WifiManager.ERROR_AUTHENTICATING) {
+                            // 处理密码错误
                             handlePasswordError();
                         }
                         break;
@@ -153,6 +166,7 @@ public class MainActivity extends AppCompatActivity {
     private ConnectivityManager.NetworkCallback callback = new ConnectivityManager.NetworkCallback() {
 
         @Override
+        // 网络可用时
         public void onAvailable(Network network) {
             super.onAvailable(network);
             setCurrentNetwork(network);
@@ -160,6 +174,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @Override
+        // 联网能力发生变化时
         public void onCapabilitiesChanged(Network network, NetworkCapabilities networkCapabilities) {
             super.onCapabilitiesChanged(network, networkCapabilities);
             if (network.equals(getCurrentNetwork())) {
@@ -176,10 +191,16 @@ public class MainActivity extends AppCompatActivity {
         this.currentNetwork = currentNetwork;
     }
 
+    // 获取扫描结果
     private void updateAccessPoints() {
         Single.create((SingleOnSubscribe<List<AccessPoint>>) emitter -> {
+            // 7.创建 AccessPoint 来保存 WIFI 的信息和状态:
+            // 分别获取到附近的 WIFI 列表和已保存的 WIFI 列表后，需要匹配附近的 WIFI 和已保存的 WIFI，
+            // 对已匹配上的 WIFI 需要同时保存其信息和状态。
+            // 通过查看源码可以知道，Settings 中 WIFI 设置的列表是将 WIFI 信息和状态保存到了 AccessPoint 中。
+            // 但是 AccessPoint 无法直接使用，所以需要自己创建一个 AccessPoint 类。
             List<AccessPoint> accessPoints = new ArrayList<>();
-            List<ScanResult> scanResults = wifiManager.getScanResults();
+            List<ScanResult> scanResults = wifiManager.getScanResults(); // 扫描结果,ScanResult 中保存了 WIFI 的名称、加密方式、信号强度等信息
             if (lastWifiInfo != null && lastWifiInfo.getNetworkId() != AccessPoint.INVALID_NETWORK_ID) {
                 lastWifiConfiguration = getWifiConfigurationForNetworkId(lastWifiInfo.getNetworkId());
             }
@@ -192,6 +213,7 @@ public class MainActivity extends AppCompatActivity {
                     if (accessPoints.contains(accessPoint)) {
                         continue;
                     }
+                    // 获取设备中已保存的 WIFI 列表的配置信息,WifiConfiguration 中除了有 WIFI 的名称、加密方式外，还有 networkId、状态及相关配置信息
                     List<WifiConfiguration> wifiConfigurations = wifiManager.getConfiguredNetworks();
                     if (wifiConfigurations != null) {
                         for (WifiConfiguration config : wifiConfigurations) {
@@ -230,6 +252,7 @@ public class MainActivity extends AppCompatActivity {
                 });
     }
 
+    // e.更新当前连接 wifi 的状态
     public void updateNetworkInfo(NetworkInfo networkInfo) {
         Single.create((SingleOnSubscribe<List<AccessPoint>>) emitter -> {
             if (networkInfo != null) {
@@ -310,11 +333,16 @@ public class MainActivity extends AppCompatActivity {
         wifiManager.enableNetwork(networkId, true);
     }
 
+    // IV.取消保存
+    // (PS 权限问题：对于普通应用只能取消保存自己添加的 wifi，无法取消保存其它应用添加的 wifi；
+    // 如果需要取消保存其它应用添加的 wifi，需要添加如下权限，并作为系统应用。
+    //<!--覆盖wifi配置 需要是 system app:<uses-permission android:name="android.permission.OVERRIDE_WIFI_CONFIG" />-->
     public void forgetWifi(AccessPoint accessPoint) {
         boolean result = wifiManager.removeNetwork(accessPoint.wifiConfiguration.networkId);
         Toast.makeText(this, result ? "取消保存成功" : "取消保存失败", Toast.LENGTH_LONG).show();
     }
 
+    // V.处理密码错误
     public void handlePasswordError() {
         if (lastWifiConfiguration != null) {
             AccessPoint accessPoint = new AccessPoint(lastWifiConfiguration);
@@ -323,6 +351,8 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
+    // B.判断 wifi 是否需要登录:
+    // 网络可用时，连接指定网址根据返回码是否是 204 判断 wifi 是否需要登录
     public void portalCurrentWifi() {
         if (lastWifiInfo.getNetworkId() != lastPortalNetworkId) {
             lastPortalNetworkId = lastWifiInfo.getNetworkId();
@@ -379,7 +409,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 根据 NetworkId 获取 WifiConfiguration 信息
+     * 6.根据 NetworkId 获取 WifiConfiguration 信息
      *
      * @param networkId 需要获取 WifiConfiguration 信息的 networkId
      * @return 指定 networkId 的 WifiConfiguration 信息
@@ -397,7 +427,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 获取当前网络信息
+     * 5.获取当前连接的 WIFI 信息和状态:
+     * 通过 ConnectivityManager 的 getActiveNetworkInfo() 方法获取到当前连接的网络信息；
+     * 通过 WifiManager 的 getConnectionInfo() 方法获取当前连接的 WIFI 信息；
+     * 根据当前 WIFI 的 networkId 获取到当前 WIFI 的配置和状态。
+     * <p>
+     * 链接：https://juejin.cn/post/6844903875263250445
+     * 来源：掘金
      */
     public NetworkInfo getActiveNetworkInfo() {
         ConnectivityManager cm = (ConnectivityManager) this.getSystemService(Context.CONNECTIVITY_SERVICE);
